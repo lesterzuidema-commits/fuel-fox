@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="theme-color" content="#ff6a00">
+
+    <!-- iOS full-screen support -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <link rel="apple-touch-icon" href="/static/images/fuelfox-logo.png">
+    <title>FuelFox</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+
+        /* Logo header */
+        .logo-header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .logo-header img {
+            width: 600px;
+            height: auto;
+        }
+
+        label { display: inline-block; width: 180px; }
+
+        /* Column formatting for results */
+        .result-row {
+            display: grid;
+            grid-template-columns: 220px 70px 60px 80px 80px 90px;
+            gap: 10px;
+            padding: 6px 0;
+            border-bottom: 1px solid #eee;
+            font-size: 14px;
+        }
+
+        .result-header {
+            display: grid;
+            grid-template-columns: 220px 70px 60px 80px 80px 90px;
+            gap: 10px;
+            padding-bottom: 6px;
+            margin-top: 20px;
+            border-bottom: 2px solid #ccc;
+            font-weight: bold;
+        }
+
+        .nearest {
+            margin-top: 15px;
+            padding: 10px;
+            border: 2px solid #4caf50;
+            background: #f6fff6;
+        }
+    </style>
+</head>
+<script>
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("/static/service-worker.js")
+    .catch(err => console.log("Service worker registration failed:", err));
+}
+</script>
+
+<body>
+
+<!-- Fuel Fox Logo Header -->
+<div class="logo-header">
+    <img src="/static/images/fuelfox-logo.png" alt="Fuel Fox Logo">
+</div>
+
+<form method="POST">
+
+    <div>
+        <label>Starting address:</label>
+        <input type="text" id="start_address" name="start_address" value="{{ start_address }}" style="width: 300px;">
+    </div>
+
+    <div>
+        <label>Fuel consumption (L/100km):</label>
+        <input type="number" step="0.1" name="fuel_consumption" value="{{ fuel_consumption }}">
+    </div>
+
+    <div>
+        <label>Fuel Type:</label>
+        <select name="fuel_type">
+            <option value="ulp91" {% if fuel_type == "ulp91" %}selected{% endif %}>ULP 91</option>
+            <option value="ulp95" {% if fuel_type == "ulp95" %}selected{% endif %}>ULP 95</option>
+            <option value="ulp98" {% if fuel_type == "ulp98" %}selected{% endif %}>ULP 98</option>
+            <option value="diesel" {% if fuel_type == "diesel" %}selected{% endif %}>Diesel</option>
+            <option value="lpg" {% if fuel_type == "lpg" %}selected{% endif %}>LPG</option>
+            <option value="e85" {% if fuel_type == "e85" %}selected{% endif %}>E85</option>
+        </select>
+    </div>
+
+    <div>
+        <label>Litres to buy:</label>
+        <input type="number" name="litres" value="{{ litres }}">
+    </div>
+
+    <div>
+        <label>Max distance (km):</label>
+        <input type="number" name="max_distance" value="{{ max_distance }}">
+    </div>
+
+    <div style="margin-top: 10px;">
+        <button type="submit">Calculate</button>
+    </div>
+
+</form>
+
+{% if results %}
+
+    <!-- TODAY RESULTS -->
+    <h2>Top 5 cheapest stations today</h2>
+
+    <div class="result-header">
+        <div>Station</div>
+        <div>Price</div>
+        <div>Dist</div>
+        <div>Fuel $</div>
+        <div>Trip $</div>
+        <div>Total $</div>
+    </div>
+
+    {% for r in results.today_top5 %}
+    <div class="result-row">
+        <div>{{ r.name }} ({{ r.suburb }})</div>
+        <div>{{ r.price_today }}c</div>
+        <div>{{ r.distance_km|round(1) }} km</div>
+        <div>${{ r.fuel_cost_today|round(2) }}</div>
+        <div>${{ r.trip_cost|round(2) }}</div>
+        <div><strong>${{ r.total_cost_today|round(2) }}</strong></div>
+    </div>
+    {% endfor %}
+
+    {% if results.today_near %}
+    <div class="nearest">
+        <strong>Cheapest within 5 km (Today)</strong>
+        <div class="result-row">
+            <div>{{ results.today_near.name }} ({{ results.today_near.suburb }})</div>
+            <div>{{ results.today_near.price_today }}c</div>
+            <div>{{ results.today_near.distance_km|round(1) }} km</div>
+            <div>${{ results.today_near.fuel_cost_today|round(2) }}</div>
+            <div>${{ results.today_near.trip_cost|round(2) }}</div>
+            <div><strong>${{ results.today_near.total_cost_today|round(2) }}</strong></div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- TOMORROW RESULTS -->
+    <h2 style="margin-top: 40px;">Top 5 cheapest stations tomorrow</h2>
+
+    <div class="result-header">
+        <div>Station</div>
+        <div>Price</div>
+        <div>Dist</div>
+        <div>Fuel $</div>
+        <div>Trip $</div>
+        <div>Total $</div>
+    </div>
+
+    {% for r in results.tomorrow_top5 %}
+    <div class="result-row">
+        <div>{{ r.name }} ({{ r.suburb }})</div>
+        <div>{{ r.price_tomorrow }}c</div>
+        <div>{{ r.distance_km|round(1) }} km</div>
+        <div>${{ r.fuel_cost_tomorrow|round(2) }}</div>
+        <div>${{ r.trip_cost|round(2) }}</div>
+        <div><strong>${{ r.total_cost_tomorrow|round(2) }}</strong></div>
+    </div>
+    {% endfor %}
+
+    {% if results.tomorrow_near %}
+    <div class="nearest">
+        <strong>Cheapest within 5 km (Tomorrow)</strong>
+        <div class="result-row">
+            <div>{{ results.tomorrow_near.name }} ({{ results.tomorrow_near.suburb }})</div>
+            <div>{{ results.tomorrow_near.price_tomorrow }}c</div>
+            <div>{{ results.tomorrow_near.distance_km|round(1) }} km</div>
+            <div>${{ results.tomorrow_near.fuel_cost_tomorrow|round(2) }}</div>
+            <div>${{ results.tomorrow_near.trip_cost|round(2) }}</div>
+            <div><strong>${{ results.tomorrow_near.total_cost_tomorrow|round(2) }}</strong></div>
+        </div>
+    </div>
+    {% endif %}
+
+{% endif %}
+
+</body>
+</html>

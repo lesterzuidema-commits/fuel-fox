@@ -1,0 +1,15 @@
+{
+  "name": "Fuel Fox",
+  "short_name": "FuelFox",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ff6a00",
+  "icons": [
+    {
+      "src": "/static/images/fuelfox-logo.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
