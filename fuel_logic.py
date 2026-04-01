@@ -11,10 +11,8 @@ API_KEY = "AIzaSyD1gxDGlhnzfhVaqzIKq8R-F5uDnRttYsw"
 FUEL_CODES = {
     "ulp91": 1,
     "ulp95": 2,
-    "ulp98": 4,
-    "lpg": 5,
-    "diesel": 6,
-    "e85": 10
+    "ulp98": 6,
+    "diesel": 4,
 }
 
 def chunk_list(lst, size):
