@@ -114,6 +114,9 @@ def get_fuel_results(start_address, fuel_type="ulp91", litres_to_buy=70, max_dis
 
     station_list = filtered_station_list
 
+    print("Unavailable stations:", len(unavailable))
+    print("Stations after filtering:", len(station_list))
+
     # -----------------------------
     # 3. Distance Matrix batching
     # -----------------------------
