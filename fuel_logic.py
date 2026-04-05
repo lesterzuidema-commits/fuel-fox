@@ -5,7 +5,7 @@ import math
 import urllib.parse
 from bs4 import BeautifulSoup
 
-API_KEY = os.getenv("AIzaSyD1gxDGlhnzfhVaqzIKq8R-F5uDnRttYsw")  # Render environment variable
+API_KEY = os.getenv("API_KEY")
 
 FUEL_CODES = {
     "ulp91": 1,
