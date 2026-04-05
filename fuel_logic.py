@@ -1,12 +1,11 @@
 import os
-API_KEY = os.getenv("AIzaSyD1gxDGlhnzfhVaqzIKq8R-F5uDnRttYsw")
-
 import requests
 import xmltodict
 import math
 import urllib.parse
+from bs4 import BeautifulSoup
 
-API_KEY = "AIzaSyD1gxDGlhnzfhVaqzIKq8R-F5uDnRttYsw"
+API_KEY = os.getenv("AIzaSyD1gxDGlhnzfhVaqzIKq8R-F5uDnRttYsw")  # Render environment variable
 
 FUEL_CODES = {
     "ulp91": 1,
@@ -25,6 +24,34 @@ def safe_xml_items(channel):
         return []
     items = channel["item"]
     return items if isinstance(items, list) else [items]
+
+# ---------------------------------------------------------
+# NEW: Fetch stations that have reported being OUT OF FUEL
+# ---------------------------------------------------------
+def get_unavailable_stations():
+    """
+    Returns a set of (station_name, suburb) pairs for stations
+    that have reported being OUT OF FUEL for any product.
+    """
+    url = "https://www.fuelwatch.wa.gov.au/fuelwatch/pages/fuelAvailability.jsp"
+    response = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
+    soup = BeautifulSoup(response.text, "html.parser")
+
+    unavailable = set()
+
+    rows = soup.select("table tr")
+    for row in rows:
+        cols = row.find_all("td")
+        if len(cols) < 3:
+            continue
+
+        station_name = cols[0].get_text(strip=True)
+        suburb = cols[2].get_text(strip=True)
+
+        unavailable.add((station_name.lower(), suburb.lower()))
+
+    return unavailable
+
 
 def get_fuel_results(start_address, fuel_type="ulp91", litres_to_buy=70, max_distance_km=20, fuel_consumption=11.6):
 
@@ -73,6 +100,19 @@ def get_fuel_results(start_address, fuel_type="ulp91", litres_to_buy=70, max_dis
             "lat": lat,
             "lng": lng
         })
+
+    # ---------------------------------------------------------
+    # NEW: Filter out stations that have reported NO FUEL
+    # ---------------------------------------------------------
+    unavailable = get_unavailable_stations()
+
+    filtered_station_list = []
+    for s in station_list:
+        key = (s["name"].lower(), s["suburb"].lower())
+        if key not in unavailable:
+            filtered_station_list.append(s)
+
+    station_list = filtered_station_list
 
     # -----------------------------
     # 3. Distance Matrix batching
