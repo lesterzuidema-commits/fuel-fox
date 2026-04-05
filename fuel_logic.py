@@ -55,6 +55,8 @@ def get_unavailable_stations():
 
 def get_fuel_results(start_address, fuel_type="ulp91", litres_to_buy=70, max_distance_km=20, fuel_consumption=11.6):
 
+    print("API KEY LOADED:", API_KEY is not None)
+    
     product_code = FUEL_CODES[fuel_type]
     headers = {"User-Agent": "Mozilla/5.0"}
 
@@ -141,6 +143,8 @@ def get_fuel_results(start_address, fuel_type="ulp91", litres_to_buy=70, max_dis
 
         elements = dm_data["rows"][0]["elements"]
 
+        print("Distance statuses:", [e.get("status") for e in elements])
+        
         for e in elements:
             if e.get("status") == "OK":
                 distances_km.append(e["distance"]["value"] / 1000)
