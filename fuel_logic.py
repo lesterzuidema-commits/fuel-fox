@@ -5,6 +5,7 @@ import urllib.parse
 from bs4 import BeautifulSoup
 import json
 import time
+import math
 
 API_KEY = os.getenv("API_KEY")
 
@@ -86,6 +87,20 @@ def safe_xml_items(channel):
 
 
 # ---------------------------------------------------------
+# Haversine (straight-line distance)
+# ---------------------------------------------------------
+def haversine(lat1, lon1, lat2, lon2):
+    R = 6371  # Earth radius in km
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = (math.sin(dlat/2)**2 +
+         math.cos(math.radians(lat1)) *
+         math.cos(math.radians(lat2)) *
+         math.sin(dlon/2)**2)
+    return 2 * R * math.asin(math.sqrt(a))
+
+
+# ---------------------------------------------------------
 # Fetch stations that have reported being OUT OF FUEL
 # ---------------------------------------------------------
 def get_unavailable_stations():
@@ -158,8 +173,8 @@ def get_fuel_results(start_address, fuel_type="ulp91", litres_to_buy=70,
             "name": s.get("trading-name"),
             "suburb": s.get("location"),
             "price_today": price_today,
-            "lat": lat,
-            "lng": lng
+            "lat": float(lat),
+            "lng": float(lng)
         })
 
     # -----------------------------
@@ -179,7 +194,36 @@ def get_fuel_results(start_address, fuel_type="ulp91", litres_to_buy=70,
     print("Stations after filtering:", len(station_list))
 
     # -----------------------------
-    # 4. Distance Matrix with caching
+    # 4. PREFILTER using haversine
+    # -----------------------------
+    # Get origin coordinates via Geocoding API
+    geo_url = (
+        "https://maps.googleapis.com/maps/api/geocode/json"
+        f"?address={urllib.parse.quote(start_address)}&key={API_KEY}"
+    )
+    geo_data = requests.get(geo_url).json()
+
+    if geo_data.get("status") != "OK":
+        print("Geocoding failed:", geo_data)
+        return None
+
+    origin_lat = geo_data["results"][0]["geometry"]["location"]["lat"]
+    origin_lng = geo_data["results"][0]["geometry"]["location"]["lng"]
+
+    buffer_km = max_distance_km + 10  # safety buffer
+
+    pre_filtered = []
+    for s in station_list:
+        dist = haversine(origin_lat, origin_lng, s["lat"], s["lng"])
+        if dist <= buffer_km:
+            pre_filtered.append(s)
+
+    print("Stations after prefiltering:", len(pre_filtered))
+
+    station_list = pre_filtered
+
+    # -----------------------------
+    # 5. Distance Matrix with caching
     # -----------------------------
     distances_km = []
     encoded_origin = urllib.parse.quote(start_address)
@@ -232,7 +276,7 @@ def get_fuel_results(start_address, fuel_type="ulp91", litres_to_buy=70,
         distances_km.extend(cached_distances + new_distances)
 
     # -----------------------------
-    # 5. Combine station + distance
+    # 6. Combine station + distance
     # -----------------------------
     results = []
     for station, dist in zip(station_list, distances_km):
@@ -260,7 +304,7 @@ def get_fuel_results(start_address, fuel_type="ulp91", litres_to_buy=70,
         })
 
     # -----------------------------
-    # 6. TODAY results
+    # 7. TODAY results
     # -----------------------------
     today_sorted = sorted(results, key=lambda x: x["total_cost_today"])
     today_top5 = today_sorted[:5]
@@ -269,7 +313,7 @@ def get_fuel_results(start_address, fuel_type="ulp91", litres_to_buy=70,
     today_cheapest_near = today_nearby[0] if today_nearby else None
 
     # -----------------------------
-    # 7. TOMORROW results
+    # 8. TOMORROW results
     # -----------------------------
     tomorrow_results = []
     for r in results:
@@ -292,7 +336,7 @@ def get_fuel_results(start_address, fuel_type="ulp91", litres_to_buy=70,
     tomorrow_cheapest_near = tomorrow_nearby[0] if tomorrow_nearby else None
 
     # -----------------------------
-    # 8. Return final structured result
+    # 9. Return final structured result
     # -----------------------------
     return {
         "today_top5": today_top5,
@@ -300,4 +344,3 @@ def get_fuel_results(start_address, fuel_type="ulp91", litres_to_buy=70,
         "tomorrow_top5": tomorrow_top5,
         "tomorrow_near": tomorrow_cheapest_near
     }
-
