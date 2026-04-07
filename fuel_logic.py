@@ -1,9 +1,10 @@
 import os
 import requests
 import xmltodict
-import math
 import urllib.parse
 from bs4 import BeautifulSoup
+import json
+import time
 
 API_KEY = os.getenv("API_KEY")
 
@@ -14,25 +15,80 @@ FUEL_CODES = {
     "diesel": 4,
 }
 
+# ---------------------------------------------------------
+# JSON CACHE FOR DISTANCE MATRIX
+# ---------------------------------------------------------
+CACHE_FILE = "distance_cache.json"
+CACHE_TTL = 60 * 60 * 24  # 24 hours
+
+
+def load_cache():
+    if not os.path.exists(CACHE_FILE):
+        return {}
+    try:
+        with open(CACHE_FILE, "r") as f:
+            return json.load(f)
+    except:
+        return {}
+
+
+def save_cache(cache):
+    try:
+        with open(CACHE_FILE, "w") as f:
+            json.dump(cache, f)
+    except:
+        pass
+
+
+def make_cache_key(origin, lat, lng):
+    return f"{origin.lower()}::{lat}::{lng}"
+
+
+def get_cached_distance(origin, lat, lng):
+    cache = load_cache()
+    key = make_cache_key(origin, lat, lng)
+
+    if key not in cache:
+        return None
+
+    entry = cache[key]
+    if time.time() - entry["timestamp"] > CACHE_TTL:
+        return None  # expired
+
+    return entry["distance_km"]
+
+
+def set_cached_distance(origin, lat, lng, distance_km):
+    cache = load_cache()
+    key = make_cache_key(origin, lat, lng)
+
+    cache[key] = {
+        "distance_km": distance_km,
+        "timestamp": time.time()
+    }
+
+    save_cache(cache)
+
+
+# ---------------------------------------------------------
+# Helper functions
+# ---------------------------------------------------------
 def chunk_list(lst, size):
     for i in range(0, len(lst), size):
         yield lst[i:i + size]
 
+
 def safe_xml_items(channel):
-    """Return channel['item'] as a list, or empty list if missing."""
     if "item" not in channel:
         return []
     items = channel["item"]
     return items if isinstance(items, list) else [items]
 
+
 # ---------------------------------------------------------
-# NEW: Fetch stations that have reported being OUT OF FUEL
+# Fetch stations that have reported being OUT OF FUEL
 # ---------------------------------------------------------
 def get_unavailable_stations():
-    """
-    Returns a set of (station_name, suburb) pairs for stations
-    that have reported being OUT OF FUEL for any product.
-    """
     url = "https://www.fuelwatch.wa.gov.au/fuelwatch/pages/fuelAvailability.jsp"
     response = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
     soup = BeautifulSoup(response.text, "html.parser")
@@ -53,10 +109,14 @@ def get_unavailable_stations():
     return unavailable
 
 
-def get_fuel_results(start_address, fuel_type="ulp91", litres_to_buy=70, max_distance_km=20, fuel_consumption=11.6):
+# ---------------------------------------------------------
+# MAIN FUNCTION
+# ---------------------------------------------------------
+def get_fuel_results(start_address, fuel_type="ulp91", litres_to_buy=70,
+                     max_distance_km=20, fuel_consumption=11.6):
 
     print("API KEY LOADED:", API_KEY is not None)
-    
+
     product_code = FUEL_CODES[fuel_type]
     headers = {"User-Agent": "Mozilla/5.0"}
 
@@ -71,7 +131,6 @@ def get_fuel_results(start_address, fuel_type="ulp91", litres_to_buy=70, max_dis
     fw_tom = xmltodict.parse(requests.get(fw_tom_url, headers=headers).text)
     stations_tomorrow = safe_xml_items(fw_tom["rss"]["channel"])
 
-    # Build lookup for tomorrow prices
     tomorrow_lookup = {}
     for s in stations_tomorrow:
         key = (s.get("trading-name"), s.get("location"))
@@ -103,9 +162,9 @@ def get_fuel_results(start_address, fuel_type="ulp91", litres_to_buy=70, max_dis
             "lng": lng
         })
 
-    # ---------------------------------------------------------
-    # NEW: Filter out stations that have reported NO FUEL
-    # ---------------------------------------------------------
+    # -----------------------------
+    # 3. Filter unavailable stations
+    # -----------------------------
     unavailable = get_unavailable_stations()
 
     filtered_station_list = []
@@ -120,17 +179,35 @@ def get_fuel_results(start_address, fuel_type="ulp91", litres_to_buy=70, max_dis
     print("Stations after filtering:", len(station_list))
 
     # -----------------------------
-    # 3. Distance Matrix batching
+    # 4. Distance Matrix with caching
     # -----------------------------
-    destinations = [f"{s['lat']},{s['lng']}" for s in station_list]
     distances_km = []
-
     encoded_origin = urllib.parse.quote(start_address)
 
-    for chunk in chunk_list(destinations, 25):
+    for chunk in chunk_list(station_list, 25):
+
+        cached_distances = []
+        uncached_destinations = []
+        uncached_stations = []
+
+        # Check cache first
+        for s in chunk:
+            cached = get_cached_distance(start_address, s["lat"], s["lng"])
+            if cached is not None:
+                cached_distances.append(cached)
+            else:
+                uncached_destinations.append(f"{s['lat']},{s['lng']}")
+                uncached_stations.append(s)
+
+        # If everything was cached
+        if len(uncached_destinations) == 0:
+            distances_km.extend(cached_distances)
+            continue
+
+        # Call Google for uncached stations
         dm_url = (
             "https://maps.googleapis.com/maps/api/distancematrix/json"
-            f"?origins={encoded_origin}&destinations={'|'.join(chunk)}"
+            f"?origins={encoded_origin}&destinations={'|'.join(uncached_destinations)}"
             f"&mode=driving&key={API_KEY}"
         )
 
@@ -138,21 +215,24 @@ def get_fuel_results(start_address, fuel_type="ulp91", litres_to_buy=70, max_dis
         print("DM response:", dm_data)
 
         if dm_data.get("status") != "OK" or "rows" not in dm_data or not dm_data["rows"]:
-            distances_km.extend([None] * len(chunk))
+            distances_km.extend(cached_distances + [None] * len(uncached_destinations))
             continue
 
         elements = dm_data["rows"][0]["elements"]
 
-        print("Distance statuses:", [e.get("status") for e in elements])
-        
-        for e in elements:
+        new_distances = []
+        for s, e in zip(uncached_stations, elements):
             if e.get("status") == "OK":
-                distances_km.append(e["distance"]["value"] / 1000)
+                dist_km = e["distance"]["value"] / 1000
+                new_distances.append(dist_km)
+                set_cached_distance(start_address, s["lat"], s["lng"], dist_km)
             else:
-                distances_km.append(None)
+                new_distances.append(None)
+
+        distances_km.extend(cached_distances + new_distances)
 
     # -----------------------------
-    # 4. Combine station + distance
+    # 5. Combine station + distance
     # -----------------------------
     results = []
     for station, dist in zip(station_list, distances_km):
@@ -180,7 +260,7 @@ def get_fuel_results(start_address, fuel_type="ulp91", litres_to_buy=70, max_dis
         })
 
     # -----------------------------
-    # 5. TODAY results
+    # 6. TODAY results
     # -----------------------------
     today_sorted = sorted(results, key=lambda x: x["total_cost_today"])
     today_top5 = today_sorted[:5]
@@ -189,7 +269,7 @@ def get_fuel_results(start_address, fuel_type="ulp91", litres_to_buy=70, max_dis
     today_cheapest_near = today_nearby[0] if today_nearby else None
 
     # -----------------------------
-    # 6. TOMORROW results
+    # 7. TOMORROW results
     # -----------------------------
     tomorrow_results = []
     for r in results:
@@ -212,7 +292,7 @@ def get_fuel_results(start_address, fuel_type="ulp91", litres_to_buy=70, max_dis
     tomorrow_cheapest_near = tomorrow_nearby[0] if tomorrow_nearby else None
 
     # -----------------------------
-    # 7. Return final structured result
+    # 8. Return final structured result
     # -----------------------------
     return {
         "today_top5": today_top5,
@@ -220,3 +300,4 @@ def get_fuel_results(start_address, fuel_type="ulp91", litres_to_buy=70, max_dis
         "tomorrow_top5": tomorrow_top5,
         "tomorrow_near": tomorrow_cheapest_near
     }
+
