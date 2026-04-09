@@ -8,7 +8,7 @@ app = Flask(__name__)
 # BASIC AUTH CONFIG
 # -----------------------------
 USERNAME = "lester"          # change if you want
-PASSWORD = "yourpassword"    # CHANGE THIS to something strong
+PASSWORD = "1q2w3e"    # CHANGE THIS to something strong
 
 def check_auth(username, password):
     return username == USERNAME and password == PASSWORD
