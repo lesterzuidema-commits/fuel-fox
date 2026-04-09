@@ -1,9 +1,39 @@
-from flask import Flask, render_template, request
+from flask import Flask, render_template, request, Response
+from functools import wraps
 from fuel_logic import get_fuel_results
 
 app = Flask(__name__)
 
+# -----------------------------
+# BASIC AUTH CONFIG
+# -----------------------------
+USERNAME = "lester"          # change if you want
+PASSWORD = "yourpassword"    # CHANGE THIS to something strong
+
+def check_auth(username, password):
+    return username == USERNAME and password == PASSWORD
+
+def authenticate():
+    return Response(
+        "Access denied", 401,
+        {"WWW-Authenticate": 'Basic realm="Login Required"'}
+    )
+
+def requires_auth(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth = request.authorization
+        if not auth or not check_auth(auth.username, auth.password):
+            return authenticate()
+        return f(*args, **kwargs)
+    return decorated
+
+
+# -----------------------------
+# MAIN ROUTE (PROTECTED)
+# -----------------------------
 @app.route("/", methods=["GET", "POST"])
+@requires_auth
 def index():
     fuel_type = "ulp91"
     litres = 70
@@ -37,6 +67,7 @@ def index():
         fuel_consumption=fuel_consumption,
         results=results
     )
+
 
 if __name__ == "__main__":
     app.run(debug=True)
